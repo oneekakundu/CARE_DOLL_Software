@@ -1,0 +1,134 @@
+========================================================================
+                      CARE EMERGENCY ASSISTANT
+                      System & Model Explanation
+========================================================================
+
+1. ARCHITECTURAL OVERVIEW & WORKFLOW
+------------------------------------
+CARE (Offline AI Emergency Assistant for Electric-Vehicle accidents) 
+coordinates multiple offline machine learning models and libraries into 
+a safety-critical responder utility.
+
+The high-level request-response workflow is as follows:
+
+   [User Input (Text or Voice)]
+                |
+                v
+      [Speech/Text Adapter] (If audio, Whisper transcribes it to text query)
+                |
+                v
+     [Retriever (FaissStore)] (Embeds query & finds top matching manual chunks)
+                |
+                v
+       [Prompt Builder] (Combines: System guidelines, safety rules, context, query)
+                |
+                v
+    [ModelManager (Ollama)] (Queries local Ollama instance for safe responder steps)
+                |
+                v
+      [Response Validator] (Verifies safety disclaimers, halts technical answers 
+                |           if no RAG manual context is available, checks hallucinations)
+                +-----> [SQLite database] (Logs query & validated response)
+                |
+                v
+    [Speech/Text Out (Piper)] (If voice request, Piper converts reply to WAV)
+                |
+                v
+  [WAV Response File / JSON] (Returned to client via FastAPI)
+
+
+2. COMPONENT & MODEL ROLES
+--------------------------
+
+A. Large Language Model: Ollama (LLaMA 3.2:3b)
+- Role: Provides local text generation for emergency instructions.
+- Process: Connects via localhost API (`http://localhost:11434/api/generate`). 
+  The ModelManager verifies server reachability and model availability on startup.
+- Fallback: If Ollama is down or model is missing, the assistant utilizes a 
+  hardcoded, expert-approved emergency fallback response (directing users to 
+  evacuate and dial 911) instead of failing or throwing exceptions.
+
+B. Vector Store: FAISS (Facebook AI Similarity Search)
+- Role: Indexes text chunks from vehicle safety manuals and performs high-speed 
+  inner-product (IP) vector similarity search.
+- Metadata: Every chunk is stored in `data/vector_store/chunks.json` and 
+  contains the Document Name, Page Number, Section Header, Chunk ID, Source 
+  file path, and original text. If no index exists, a startup warning is 
+  logged, and retrieval fallbacks are triggered cleanly.
+
+C. Embedding Model: Sentence-Transformers (BAAI/bge-small-en-v1.5)
+- Role: Translates raw text chunks and user queries into 384-dimensional dense 
+  numerical vectors (embeddings) representing semantic meaning.
+- Loading: Wrapped in a lazy-loaded, thread-safe `EmbeddingManager` to prevent 
+  heavy startup delays. Model is loaded and cached in memory on the first request.
+
+D. Speech-to-Text: Faster-Whisper (Whisper Base)
+- Role: Transcribes user audio uploads into text.
+- Optimization: Uses C-Translate2 translation, running on CPU with `int8` 
+  quantization for extremely fast, lightweight offline performance on consumer hardware.
+
+E. Text-to-Speech: Piper TTS
+- Role: Synthesizes text emergency steps back into spoken WAV audio.
+- Execution: Calls the local `piper` executable via subprocessing, streaming the 
+  response text to stdin and saving the generated WAV file output.
+
+F. Logging & Auditing: SQLite & Structured logging
+- SQLite: Stores a persistent local database audit log of all queries and 
+  validated assistant responses. Exposes connection check methods.
+- Logging: All events (startup, ingestion, retrieval, LLM queries, voice transcribing, 
+  and warnings/errors) are formatted and written to `logs/app.log`.
+
+
+3. HOW TO CONNECT AND SET UP AN LLM (OLLAMA)
+---------------------------------------------
+Since CARE is designed to be completely offline-first, you must host your own LLM 
+using Ollama:
+
+1. Download Ollama:
+   - Windows: Download installer from https://ollama.com/download/OllamaSetup.exe 
+     and run.
+   - Linux: Run `curl -fsSL https://ollama.com/install.sh | sh`
+   - macOS: Download the zip file from ollama.com.
+
+2. Start the Ollama Server:
+   - Ensure the Ollama background service is running (check system tray).
+   - Or start manually in a terminal:
+     `ollama serve`
+
+3. Pull the configured model:
+   - Open a terminal and run:
+     `ollama pull llama3.2:3b`
+   - This downloads the 3-billion parameter model (approx 2GB) locally.
+
+4. Verify connection in environment file:
+   - Open `.env` in `emergency_assistance` and configure the URL and model:
+     CARE_OLLAMA_URL=http://127.0.0.1:11434
+     CARE_OLLAMA_MODEL=llama3.2:3b
+
+
+4. RUNNING THE APPLICATION
+--------------------------
+
+A. PDF Manual Ingestion
+1. Place rescue/rescue-guide PDFs inside `data/raw/`.
+2. Run:
+   `python main.py --ingest`
+3. This will extract text page-by-page, run OCR on scanned/unreadable pages, 
+   clean the text, chunk it, generate embeddings, and build the FAISS index.
+
+B. Run FastAPI Server
+1. Start the API by running:
+   `python main.py`
+2. This runs Uvicorn on http://127.0.0.1:8000.
+3. Open http://127.0.0.1:8000/docs in your browser to interact with the API 
+   endpoints: `/ask`, `/voice`, `/health`, `/ingest`.
+
+C. Run Interactive CLI
+1. Run:
+   `python main.py --cli`
+2. Chat directly in the terminal. Type 'quit' to exit.
+
+D. Run Automated Tests
+1. Run pytest using your virtual environment:
+   `pytest`
+========================================================================
