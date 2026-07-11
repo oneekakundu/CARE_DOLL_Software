@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record microphone audio from the terminal and save it as a WAV file."""
+"""Record microphone audio and save it into the project's data/audio folder."""
 
 from __future__ import annotations
 
@@ -13,25 +13,31 @@ import sounddevice as sd
 import soundfile as sf
 
 
-def ensure_data_directory(base_dir: Path) -> Path:
-    """Create a data folder if it does not already exist."""
-    data_dir = base_dir / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir
+def get_project_root() -> Path:
+    """Return the CARE_DOLL_Software project root based on this file location."""
+    return Path(__file__).resolve().parent.parent
 
 
-def create_output_path(data_dir: Path) -> Path:
+def ensure_data_directories(project_root: Path) -> Path:
+    """Create the required project data folders if they do not exist."""
+    audio_dir = project_root / "data" / "audio"
+    (project_root / "data" / "text").mkdir(parents=True, exist_ok=True)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    return audio_dir
+
+
+def create_output_path(audio_dir: Path) -> Path:
     """Create a unique WAV file name using the current timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return data_dir / f"recording_{timestamp}.wav"
+    return audio_dir / f"recording_{timestamp}.wav"
 
 
-def record_audio(output_path: Path, samplerate: int = 44100, channels: int = 1) -> None:
-    """Record audio until the user presses Enter to stop."""
+def record_audio(samplerate: int = 44100, channels: int = 1) -> Path:
+    """Record audio until the user presses Enter to stop and return the saved file path."""
     frames: list[np.ndarray] = []
 
     def callback(indata: np.ndarray, frames_count: int, time_info, status) -> None:
-        """Store audio chunks as they are captured."""
+        """Store incoming audio chunks."""
         if status:
             print(f"Audio status: {status}")
         frames.append(indata.copy())
@@ -59,19 +65,21 @@ def record_audio(output_path: Path, samplerate: int = 44100, channels: int = 1) 
     if not frames:
         raise RuntimeError("No audio was captured.")
 
+    project_root = get_project_root()
+    audio_dir = ensure_data_directories(project_root)
+    output_path = create_output_path(audio_dir)
+
     audio_data = np.concatenate(frames, axis=0)
     sf.write(str(output_path), audio_data, samplerate)
     print(f"Recording saved successfully: {output_path}")
+    return output_path.resolve()
 
 
 def main() -> None:
-    """Run the full recording workflow."""
-    base_dir = Path(__file__).resolve().parent
-    data_dir = ensure_data_directory(base_dir)
-    output_path = create_output_path(data_dir)
-
+    """Run the recording workflow as a standalone script."""
     try:
-        record_audio(output_path)
+        audio_path = record_audio()
+        print(f"Saved audio file: {audio_path}")
     except RuntimeError as exc:
         print(f"Error: {exc}")
         sys.exit(1)
