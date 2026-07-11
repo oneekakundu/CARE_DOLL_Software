@@ -1,3 +1,5 @@
 venv/
+.venv
 .pytest_cache/
 emergency_assistance/__pycache__
+Voice_Input/__pycache__
