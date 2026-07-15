@@ -17,7 +17,7 @@ class DoclingParser:
     """Docling adapter tuned for searchable PDFs and structured RAG chunking."""
 
     def __init__(self) -> None:
-        self._converter = self._build_converter()
+        self._converter = None
 
     def parse(self, document: DocumentFile) -> ParsedDocument:
         start_time = time.perf_counter()
@@ -29,7 +29,10 @@ class DoclingParser:
             "chunk_id": None,
         }
         try:
-            markdown = self._extract_markdown(document)
+            if document.path.suffix.lower() == ".md":
+                markdown = document.path.read_text(encoding="utf-8")
+            else:
+                markdown = self._extract_markdown(document)
             sections = self._sections_from_markdown(
                 markdown,
                 source=document.path.name,
@@ -59,6 +62,8 @@ class DoclingParser:
             LOGGER.info("Memory Released: %s", document.path.name)
 
     def _extract_markdown(self, document: DocumentFile) -> str:
+        if self._converter is None:
+            self._converter = self._build_converter()
         if document.path.suffix.lower() == ".pdf":
             self._configure_pdf_pipeline(do_ocr=False, force_backend_text=True)
             try:

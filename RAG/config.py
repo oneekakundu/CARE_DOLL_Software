@@ -14,7 +14,7 @@ CHUNKER = "semantic"
 
 @dataclass(frozen=True, slots=True)
 class RAGConfig:
-    document_path: Path = PROJECT_ROOT / "documents"
+    document_path: Path = PROJECT_ROOT / "documents" / "extracted"
     question_path: Path = PROJECT_ROOT / "data" / "text"
     vector_store_path: Path = PROJECT_ROOT / "data" / "vector_store"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
@@ -22,7 +22,7 @@ class RAGConfig:
     chunk_size: int = 500
     chunk_overlap: int = 100
     top_k: int = 5
-    supported_extensions: tuple[str, ...] = (".pdf", ".docx", ".pptx", ".html", ".htm", ".md", ".txt")
+    supported_extensions: tuple[str, ...] = (".md", ".txt")
 
 
 DEFAULT_CONFIG = RAGConfig()

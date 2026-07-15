@@ -3,7 +3,9 @@ venv/
 .pytest_cache/
 emergency_assistance/__pycache__
 Voice_Input/__pycache__
-emergency_assistance/
 data/rag_test_error.log
 data/rag_test_output.log
 RAG/__pycache__
+__pycache__/
+*.py[cod]
+emergency_assistance/

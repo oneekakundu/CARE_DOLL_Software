@@ -5,6 +5,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Ensure UTF-8 output encoding to prevent Windows cp1252 charmap print errors
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 from .chunker import get_chunker
 from .config import DEFAULT_CONFIG, RAGConfig
 from .document_loader import DocumentLoader
