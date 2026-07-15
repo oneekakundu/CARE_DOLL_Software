@@ -17,12 +17,14 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from RAG.rag_pipeline import RAGPipeline
 from Voice_Input.pipeline import run_pipeline
+from LLM import OllamaRAGAssistant
 
 
 def main() -> None:
     """Record audio, transcribe it, then retrieve relevant emergency information."""
     parser = argparse.ArgumentParser(description="Run the CARE DOLL pipeline from microphone or text input.")
     parser.add_argument("--query", "-q", type=str, help="Text query to bypass voice input and transcription.")
+    parser.add_argument("--model", "-m", type=str, default="qwen2.5:3b", help="LLM model name.")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -50,6 +52,25 @@ def main() -> None:
     rag = RAGPipeline()
     results = rag.retrieve(question)
     rag.display(question, results)
+
+    # Convert retrieved chunks to context dictionaries for the LLM layer
+    context_chunks = [
+        {
+            "text": res.chunk.text,
+            "source": res.chunk.source,
+            "section": res.chunk.section_heading,
+        }
+        for res in results
+    ]
+
+    print("\n" + "=" * 60)
+    print("CARE DOLL: Local LLM Answer Generation")
+    print("=" * 60)
+
+    assistant = OllamaRAGAssistant(model=args.model)
+    answer = assistant.generate_answer(question, context_chunks)
+    print(f"\n{answer}\n")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
