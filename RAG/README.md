@@ -2,35 +2,50 @@
 
 This folder implements the offline retrieval part of CARE DOLL. It finds the most relevant passages from the emergency manuals; it never generates an answer and does not use OpenAI, Ollama, or another LLM.
 
-## Flow
+## Ingestion & Extraction Flow
 
-```text
-documents/
-  → Docling parses PDFs and other supported documents
-  → selected chunker creates metadata-preserving chunks
-  → BAAI/bge-small-en-v1.5 creates local embeddings
-  → FAISS stores/searches the vectors
-  → top matching chunks are displayed in the terminal
-```
+The document ingestion is divided into two phases to optimize retrieval startup and memory consumption:
 
-`main.py` runs the complete implemented workflow:
+1. **Pre-Extraction Phase (`extract_docs.py`)**:
+   - Walks raw PDF documents under `documents/raw/`.
+   - Uses Docling to parse and convert PDFs into clean Markdown (`.md`) and structured JSON (`.json`) files.
+   - Outputs the converted files into `documents/extracted/`.
 
-```text
-Microphone → Voice_Input/record_audio.py → audio WAV
-→ Voice_Input/Speech_to_text.py → data/text/<recording>.txt
-→ RAG retrieval → terminal chunks
-```
+2. **RAG Retrieval Phase**:
+   - Reads the pre-extracted `.md` files from `documents/extracted/` (skipping the `.json` files to avoid duplicates).
+   - Checks index status. Since the files are already in Markdown, this skips heavy PyTorch/EasyOCR model loading during retrieval runtime, allowing instantaneous startups.
+   - The selected chunker splits the text into metadata-preserving chunks.
+   - Creates embeddings using `BAAI/bge-small-en-v1.5`.
+   - Indexes and retrieves using FAISS.
 
-Run it from the project root after activating the virtual environment:
+## Usage
+
+### Run Full Pipeline (Voice Input -> Speech-to-Text -> RAG)
+Run it from the project root:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py
 ```
 
-To run retrieval from the newest existing text file without recording new audio:
+### Run Full Pipeline with Text Query (Bypass Microphone)
+To test a query directly without recording audio:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --query "The battery of the car is getting heated, what should I do?"
+```
+
+### Run Retrieval from the Latest Text File
+To run retrieval from the newest existing transcribed query file without recording:
 
 ```powershell
 .\.venv\Scripts\python.exe -m RAG.rag_pipeline
+```
+
+### Pre-Extract New raw PDFs
+If you add new PDFs to `documents/raw/`, run the extraction script to sync and extract them first:
+
+```powershell
+.\.venv\Scripts\python.exe -m RAG.extract_docs
 ```
 
 ## Terminal output
@@ -79,17 +94,18 @@ The next run automatically rebuilds the FAISS index because the chunker name is 
 - `chunk_overlap` — context repeated between chunks, default `100` tokens
 - `embedding_model` — local Sentence Transformers model
 - `top_k` — number of displayed chunks, default `5`
-- `document_path` — default `documents/`
+- `document_path` — default `documents/extracted/`
 - `vector_store_path` — default `data/vector_store/`
 
-Changing the embedding model, chunk size, or overlap also triggers an automatic FAISS rebuild. Adding, changing, or removing a supported file under `documents/` does the same.
+Changing the embedding model, chunk size, or overlap also triggers an automatic FAISS rebuild. Adding, changing, or removing a supported file under `documents/extracted/` does the same.
 
 ## Module responsibilities
 
 | File | Responsibility |
 | --- | --- |
-| `document_loader.py` | Discovers documents and creates content hashes. |
-| `parser.py` | Uses Docling to convert source documents into heading-based sections. |
+| `extract_docs.py` | Pre-extracts raw PDFs using Docling, syncing categories and exporting `.md` and `.json` files. |
+| `document_loader.py` | Discovers `.md` documents under `documents/extracted/` and creates content hashes. |
+| `parser.py` | Parses Markdown documents into structured, heading-based sections (skips Docling converter runtime load). |
 | `chunker.py` | Provides and selects chunking strategies. |
 | `embedder.py` | Loads the local BGE embedding model and creates vectors. |
 | `vector_store.py` | Saves/loads FAISS and metadata. |
