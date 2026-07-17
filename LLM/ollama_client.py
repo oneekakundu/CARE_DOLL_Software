@@ -7,13 +7,16 @@ import logging
 import requests
 from typing import Any, Dict, List
 
+# Set up simple logging to see what's happening
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 class OllamaRAGAssistant:
     """Assistant utilizing a local Ollama instance for context-grounded generation."""
 
-    def __init__(self, model: str = "llama3.2:3b", base_url: str = "http://localhost:11434") -> None:
+    # CHANGED: Default model is now set to "qwen2.5:3b"
+    def __init__(self, model: str = "qwen2.5:3b", base_url: str = "http://localhost:11434") -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.generate_url = f"{self.base_url}/api/generate"
@@ -25,7 +28,8 @@ class OllamaRAGAssistant:
             text = chunk.get("text", "").strip()
             source = chunk.get("source", "").strip()
             section = chunk.get("section", "").strip() or "General"
-            context_str += f"--- Context Chunk {idx} (Source: {source}, Section: {section}) ---\n{text}\n\n"
+            # Using clean XML-like tags helps Qwen isolate context perfectly
+            context_str += f"<chunk id=\"{idx}\" source=\"{source}\" section=\"{section}\">\n{text}\n</chunk>\n\n"
 
         prompt = (
             "You are the intelligence engine for CARE_DOLL, an emergency assistance and response system for electric vehicles.\n"
@@ -72,3 +76,40 @@ class OllamaRAGAssistant:
         except Exception as exc:
             logger.error(f"Unexpected error in OllamaRAGAssistant: {exc}")
             return "I'm sorry, an unexpected error occurred during answer generation."
+
+
+# This block handles execution when running the file directly
+if __name__ == "__main__":
+    # 1. Initialize the assistant with your Qwen model
+    assistant = OllamaRAGAssistant(model="qwen2.5:3b")
+    
+    # 2. Mock some sample RAG context data that a retriever would pass in
+    mock_retrieved_chunks = [
+        {
+            "text": "In the event of a high-voltage battery pack overheating, the CARE_DOLL system will automatically isolate the cell modules and activate the localized coolant flush. The driver will see a red flashing 'HV BATTERY HOT' warning on the main instrument cluster.",
+            "source": "Emergency_Procedures_Manual.pdf",
+            "section": "Battery Safety"
+        },
+        {
+            "text": "Tire pressure for the EV model standard 19-inch wheels should always be maintained at 42 PSI cold for optimal range and safety.",
+            "source": "Owners_Manual.pdf",
+            "section": "Maintenance"
+        }
+    ]
+    
+    # 3. Ask a question that is inside the context
+    test_question = "What warning will the driver see if the high-voltage battery overheats?"
+    
+    print(f"Asking Qwen: '{test_question}'...\n")
+    answer = assistant.generate_answer(question=test_question, context_chunks=mock_retrieved_chunks)
+    print("--- Qwen Response ---")
+    print(answer)
+    print("---------------------\n")
+
+    # 4. Ask a question that is NOT in the context to test your grounding rules
+    out_of_bounds_question = "What is the top speed of the car?"
+    print(f"Asking Qwen an out-of-context question: '{out_of_bounds_question}'...\n")
+    fallback_answer = assistant.generate_answer(question=out_of_bounds_question, context_chunks=mock_retrieved_chunks)
+    print("--- Qwen Response ---")
+    print(fallback_answer)
+    print("---------------------")
