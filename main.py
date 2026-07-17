@@ -18,6 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from RAG.rag_pipeline import RAGPipeline
 from Voice_Input.pipeline import run_pipeline
 from LLM import OllamaRAGAssistant
+import Voice_Output.pipeline
 
 
 def main() -> None:
@@ -71,6 +72,10 @@ def main() -> None:
     answer = assistant.generate_answer(question, context_chunks)
     print(f"\n{answer}\n")
     print("=" * 60)
+
+    # Convert answer to spoken audio
+    profile = "emergency" if "emergency" in question.lower() or "heated" in question.lower() else "default"
+    Voice_Output.pipeline.speak(answer, voice_profile=profile)
 
 
 if __name__ == "__main__":

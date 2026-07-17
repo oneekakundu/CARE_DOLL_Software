@@ -9,3 +9,4 @@ RAG/__pycache__
 __pycache__/
 *.py[cod]
 emergency_assistance/
+data/rag_test_error.log
