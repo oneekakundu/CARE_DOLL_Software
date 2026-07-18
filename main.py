@@ -28,6 +28,9 @@ def main() -> None:
     parser.add_argument("--model", "-m", type=str, default="qwen2.5:3b", help="LLM model name.")
     args = parser.parse_args()
 
+    # Perform clear startup validation for local TTS assets (Piper binary and models)
+    Voice_Output.pipeline.validate_setup_diagnostics()
+
     print("=" * 60)
     print("CARE DOLL: Voice/Text Input -> RAG Retrieval")
     print("=" * 60)
