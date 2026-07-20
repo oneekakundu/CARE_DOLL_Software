@@ -24,5 +24,10 @@ class VoiceConfig:
         "emergency": {"rate_multiplier": 1.15, "style": "urgent"},
         "companion": {"rate_multiplier": 1.0, "style": "friendly"}
     })
+    
+    # XTTS v2 Configuration
+    xtts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
+    xtts_model_dir: Path = PROJECT_ROOT / "models" / "xtts_v2"
+
 
 DEFAULT_VOICE_CONFIG = VoiceConfig()

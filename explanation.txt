@@ -98,3 +98,202 @@ To ensure query startups are instantaneous, the extraction pipeline is completel
 3. Wake-Word Integration: Incorporate OpenWakeWord for continuous, hands-free active monitoring.
 4. Portability: Compile the program dependencies to deploy directly on physical companion hardware (Raspberry Pi/Linux boards).
 ========================================================================
+
+## GPU/CPU BEHAVIOR AND LAZY LOADING
+
+The personalized XTTS v2 voice-cloning subsystem is designed as an optional, lazily loaded component of CARE DOLL.
+
+Piper remains the default Text-to-Speech engine and is used for emergency responses. XTTS v2 is initialized only when a personalized voice profile is available and personalized companion speech is requested.
+
+### Lazy Loading
+
+The `XTTSv2Engine` does not load the XTTS v2 neural model during normal CARE DOLL startup.
+
+During:
+
+* Standard system startup
+* RAG initialization
+* LLM response generation
+* Emergency mode
+* Piper-based speech synthesis
+
+the XTTS v2 model is not loaded into GPU VRAM or system RAM.
+
+The XTTS model is loaded only when all of the following conditions are satisfied:
+
+1. A personalized voice mode is requested.
+2. A valid voice profile exists.
+3. The authorized reference audio is available.
+4. XTTS v2 is installed and configured.
+
+The implementation should also use lazy imports for heavy XTTS and deep-learning dependencies wherever practical. This prevents unnecessary initialization overhead when CARE DOLL is operating exclusively in Piper mode.
+
+The intended execution flow is:
+
+```text
+CARE DOLL Startup
+        |
+        v
+   Piper Available
+        |
+        v
+  Normal Operation
+        |
+        ├── Emergency Request
+        │       |
+        │       v
+        │     Piper
+        │
+        └── Companion Request
+                |
+                v
+       Personalized Profile Ready?
+                |
+          ┌─────┴─────┐
+          │           │
+         No          Yes
+          │           │
+          v           v
+        Piper      XTTS v2
+                      |
+                      v
+              Load Model Lazily
+```
+
+This architecture ensures that the heavier XTTS v2 subsystem does not affect the reliability or startup performance of the core emergency assistant.
+
+---
+
+### Device Detection
+
+Before loading the XTTS v2 model, the system detects the available execution device.
+
+The detection logic checks whether CUDA is available through PyTorch:
+
+```python
+torch.cuda.is_available()
+```
+
+If a compatible NVIDIA CUDA environment is available:
+
+```text
+XTTS v2 device: CUDA
+```
+
+the model is configured to use GPU acceleration.
+
+If CUDA is unavailable:
+
+```text
+XTTS v2 device: CPU
+```
+
+the system falls back to CPU execution.
+
+The device selection is therefore:
+
+```text
+CUDA Available?
+      |
+  ┌───┴───┐
+ Yes      No
+  |        |
+  v        v
+ CUDA     CPU
+```
+
+The system must not assume that a CUDA-capable NVIDIA GPU is always available. Device selection should be detected dynamically at runtime.
+
+Because XTTS v2 is considerably heavier than Piper, GPU execution is preferred when compatible hardware and drivers are available. CPU execution remains available as a compatibility fallback, although synthesis may be slower.
+
+---
+
+### Speaker Conditioning
+
+XTTS v2 uses a reference recording to condition the generated speech toward the characteristics of an authorized speaker.
+
+For example:
+
+```text
+data/
+└── voices/
+    └── profiles/
+        └── primary_user/
+            └── reference.wav
+```
+
+The reference recording is supplied to the XTTS v2 synthesis process as the speaker reference audio.
+
+Conceptually:
+
+```text
+Text Response
+      +
+      │
+      ▼
+Authorized Reference Audio
+      +
+      │
+      ▼
+XTTS v2
+      │
+      ▼
+Personalized Speech
+```
+
+The reference audio is used to condition the generated voice rather than requiring the system to train a new neural TTS model from scratch.
+
+The voice profile manager is responsible for verifying that:
+
+* The profile exists.
+* The reference audio exists.
+* The audio file is readable.
+* The profile is enabled.
+* The required consent flag is confirmed.
+
+Only after these checks succeed should the reference audio be passed to XTTS v2.
+
+---
+
+### Emergency and Personalized Voice Separation
+
+CARE DOLL intentionally separates emergency speech from personalized companion speech.
+
+#### Emergency Mode
+
+```text
+Emergency Response
+        |
+        v
+      Piper
+        |
+        v
+   Fast Reliable Audio
+```
+
+#### Personalized Companion Mode
+
+```text
+Companion Response
+        |
+        v
+Personalized Profile Ready?
+        |
+   ┌────┴────┐
+  No        Yes
+   |          |
+   v          v
+ Piper      XTTS v2
+              |
+              v
+     Personalized Voice
+```
+
+This separation ensures that the personalized voice-cloning subsystem remains optional.
+
+If XTTS v2 is unavailable, the personalized profile is incomplete, or the reference audio cannot be accessed, the core CARE DOLL emergency assistant continues operating through Piper.
+
+The design principle is:
+
+> **Personalized voice cloning enhances CARE DOLL but must never be a dependency for emergency assistance.**
+

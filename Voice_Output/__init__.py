@@ -8,6 +8,12 @@ from .voice_profile_manager import (
     ProfileReadError,
 )
 from .engine_selector import EngineSelector, ENGINE_PIPER, ENGINE_XTTS_V2
+from .xtts_engine import (
+    XTTSv2Engine,
+    XTTSEngineError,
+    XTTSEngineUnavailableError,
+    XTTSGenerationError,
+)
 
 __all__ = [
     "speak",
@@ -22,5 +28,9 @@ __all__ = [
     "EngineSelector",
     "ENGINE_PIPER",
     "ENGINE_XTTS_V2",
+    "XTTSv2Engine",
+    "XTTSEngineError",
+    "XTTSEngineUnavailableError",
+    "XTTSGenerationError",
 ]
 
