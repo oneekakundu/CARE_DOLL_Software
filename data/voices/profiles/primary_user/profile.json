@@ -1,0 +1,8 @@
+{
+  "profile_name": "primary_user",
+  "engine": "xtts_v2",
+  "language": "en",
+  "reference_audio": "reference.wav",
+  "enabled": true,
+  "consent_confirmed": true
+}
