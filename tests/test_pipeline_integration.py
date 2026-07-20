@@ -28,7 +28,8 @@ def test_speak_backwards_compatibility(test_config: VoiceConfig, monkeypatch):
     mock_piper = MagicMock()
     monkeypatch.setattr("Voice_Output.tts_engine.PiperTTSEngine.synthesize", mock_piper)
 
-    out_path = speak("Default response text.", config=test_config)
+    # Calling speak(text) without voice profile when no ready profile exists uses Piper
+    out_path = speak("Default response text.", speaker_profile="unready_user", config=test_config)
     assert out_path is not None
     assert "piper" in out_path.name.lower()
     assert mock_piper.called

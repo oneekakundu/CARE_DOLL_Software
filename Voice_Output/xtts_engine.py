@@ -109,6 +109,28 @@ class XTTSv2Engine:
         logger.info(f"XTTS v2 device: {device.upper()}")
 
         try:
+            import os
+            os.environ["COQUI_TOS_AGREED"] = "1"
+
+            # Patch torchaudio.load to use soundfile backend, avoiding Windows torchcodec DLL errors
+            try:
+                import torchaudio
+                import soundfile as sf
+                import torch
+
+                def _soundfile_load(filepath, *args, **kwargs):
+                    data, sr = sf.read(str(filepath))
+                    tensor = torch.from_numpy(data).float()
+                    if tensor.ndim == 1:
+                        tensor = tensor.unsqueeze(0)
+                    elif tensor.ndim == 2:
+                        tensor = tensor.T
+                    return tensor, sr
+
+                torchaudio.load = _soundfile_load
+            except Exception as patch_err:
+                logger.debug(f"Could not patch torchaudio.load: {patch_err}")
+
             from TTS.api import TTS
             use_gpu = (device == "cuda")
             model_name = getattr(

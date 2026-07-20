@@ -1,0 +1,110 @@
+========================================================================
+CARE DOLL OFFLINE AI EMERGENCY ASSISTANT - VOICE OUTPUT PIPELINE
+========================================================================
+
+SYSTEM OVERVIEW
+---------------
+CARE DOLL features an offline dual-engine Voice Output Architecture designed to deliver fast, reliable emergency warnings while providing optional personalized companion speech.
+
+Core Components:
+1. Piper TTS Engine (Default & Emergency Engine)
+2. VoiceProfileManager (Voice Profile Readiness & Metadata Management)
+3. EngineSelector (Emergency & Readiness-Based Selection Engine)
+4. XTTSv2Engine (Optional Offline Personalized Zero-Shot Voice Cloning Engine)
+5. Voice Output Pipeline (`speak()` API)
+
+========================================================================
+1. PIPER TTS ENGINE
+================--------------------------------------------------------
+* Default offline Text-to-Speech engine.
+* Fast, lightweight ONNX runtime execution (`en_US-lessac-medium.onnx`).
+* Used exclusively for:
+  - Emergency responses
+  - Safety instructions
+  - Critical warnings
+  - Fallback responses when personalized voice is unavailable or uninstalled.
+* Guaranteed to operate independently without any external or deep learning dependencies.
+
+========================================================================
+2. VOICE PROFILE MANAGEMENT SYSTEM (`VoiceProfileManager`)
+================--------------------------------------------------------
+Directory Structure:
+data/
+└── voices/
+    └── profiles/
+        └── primary_user/
+            ├── profile.json
+            └── reference.wav   (User sample voice recording)
+
+Metadata (`profile.json`):
+{
+  "profile_name": "primary_user",
+  "engine": "xtts_v2",
+  "language": "en",
+  "reference_audio": "reference.wav",
+  "enabled": true,
+  "consent_confirmed": true
+}
+
+Readiness Rules:
+A voice profile is READY only if ALL 6 conditions pass:
+1. Profile directory exists.
+2. `profile.json` exists and is valid JSON.
+3. Reference audio file (`reference.wav`) exists in the profile folder.
+4. Reference audio file is readable and non-empty (>0 bytes).
+5. `consent_confirmed` is true.
+6. `enabled` is true.
+
+========================================================================
+3. ENGINE SELECTOR (`EngineSelector`)
+================--------------------------------------------------------
+Selection Rules:
+- Rule 1: Emergency mode ALWAYS uses Piper (`emergency=True` -> `piper`).
+- Rule 2: If personalized voice profile is not ready -> `piper`.
+- Rule 3: If personalized voice profile is ready -> `xtts_v2`.
+
+========================================================================
+4. DEBUGGING & PERSONALIZED VOICE VERIFICATION SUMMARY
+================--------------------------------------------------------
+Root Causes Identified & Fixed During Full Pipeline Testing:
+1. Missing `coqui-tts` package:
+   - Solution: Installed `coqui-tts` precompiled Windows x64 binary wheel (`coqui_tts-0.24.3-cp311-cp311-win_amd64.whl`).
+2. Dependency Version Incompatibility (`LogitsWarper` ImportError):
+   - Cause: `transformers==4.57.6` removed top-level `LogitsWarper` export.
+   - Solution: Downgraded to `transformers==4.39.3` and `tokenizers==0.15.2`.
+3. Audio Decoder DLL Failure (`TorchCodec` Error):
+   - Cause: `torchaudio==2.11.0` attempted `load_with_torchcodec` requiring non-installed FFmpeg C++ shared DLLs.
+   - Solution: Added automatic monkeypatch in `XTTSv2Engine.load_model()` replacing `torchaudio.load()` with `soundfile` reader, converting audio frames directly to PyTorch tensors.
+4. Interactive License Prompt Hang:
+   - Cause: Coqui TTS prompted for interactive license agreement (`[y/n]`).
+   - Solution: Set `os.environ["COQUI_TOS_AGREED"] = "1"` in `XTTSv2Engine.load_model()`.
+
+========================================================================
+5. E2E SYNTHESIS VERIFICATION RESULTS
+================--------------------------------------------------------
+Sample Voice Reference Audio:
+- Source: `data/audio/recording_20260714_203944.wav` (545,324 bytes, 6.18 seconds, 44.1kHz 16-bit mono)
+
+Personalized Synthesis Output:
+- Output File: `data/tts/response_xtts_v2_20260720_131704.wav`
+- File Size: `394,348 bytes`
+- Audio Duration: `8.21 seconds`
+- Format: `24,000 Hz, 16-bit PCM Mono WAV`
+- Status: **PASSED (100% Verified)**
+
+========================================================================
+6. PIPELINE API & BACKWARD COMPATIBILITY
+================--------------------------------------------------------
+Function Signature:
+```python
+def speak(
+    text: str,
+    voice_profile: str = "default",
+    speaker_profile: str = "primary_user",
+    config: VoiceConfig = DEFAULT_VOICE_CONFIG
+) -> Path | None
+```
+
+API Usage Examples:
+- Emergency Mode: `speak("Emergency warning!", voice_profile="emergency")` -> Piper
+- Companion Mode: `speak("Hello!", voice_profile="companion", speaker_profile="primary_user")` -> XTTS v2
