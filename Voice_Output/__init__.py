@@ -7,6 +7,7 @@ from .voice_profile_manager import (
     ProfileInvalidError,
     ProfileReadError,
 )
+from .engine_selector import EngineSelector, ENGINE_PIPER, ENGINE_XTTS_V2
 
 __all__ = [
     "speak",
@@ -18,5 +19,8 @@ __all__ = [
     "ProfileNotFoundError",
     "ProfileInvalidError",
     "ProfileReadError",
+    "EngineSelector",
+    "ENGINE_PIPER",
+    "ENGINE_XTTS_V2",
 ]
 
