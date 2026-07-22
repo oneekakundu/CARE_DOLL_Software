@@ -2,41 +2,45 @@
 CARE DOLL OFFLINE AI EMERGENCY ASSISTANT - VOICE OUTPUT PIPELINE
 ========================================================================
 
-SYSTEM OVERVIEW
----------------
-CARE DOLL features an offline dual-engine Voice Output Architecture designed to deliver fast, reliable emergency warnings while providing optional personalized companion speech.
+1. SYSTEM OVERVIEW
+------------------
+The Voice Output subsystem of CARE DOLL provides an offline dual-engine speech synthesis pipeline. It is architected to guarantee immediate, low-latency emergency warnings while allowing optional, personalized companion speech.
 
-Core Components:
-1. Piper TTS Engine (Default & Emergency Engine)
+The core components of the Voice Output subsystem are:
+1. Piper TTS Engine (Default & Emergency Speech Engine)
 2. VoiceProfileManager (Voice Profile Readiness & Metadata Management)
 3. EngineSelector (Emergency & Readiness-Based Selection Engine)
-4. XTTSv2Engine (Optional Offline Personalized Zero-Shot Voice Cloning Engine)
-5. Voice Output Pipeline (`speak()` API)
+4. XTTSv2Engine (Optional Offline Personalized Voice Synthesis Engine)
+5. Voice Output Pipeline (`speak()` API & Audio Output Routing)
 
 ========================================================================
-1. PIPER TTS ENGINE
-================--------------------------------------------------------
-* Default offline Text-to-Speech engine.
-* Fast, lightweight ONNX runtime execution (`en_US-lessac-medium.onnx`).
-* Used exclusively for:
+2. PIPER TTS ENGINE
+===================
+Piper serves as the default, mandatory speech engine for CARE DOLL.
+
+* Role: Reliability-critical speech engine for all emergency and default responses.
+* Default Model: `en_US-lessac-medium.onnx`
+* Target Operations:
   - Emergency responses
   - Safety instructions
   - Critical warnings
-  - Fallback responses when personalized voice is unavailable or uninstalled.
-* Guaranteed to operate independently without any external or deep learning dependencies.
+  - Fallback responses when personalized voice profiles are unconfigured or unavailable
+* Independence: Operates via a lightweight ONNX runtime without requiring PyTorch, CUDA, or heavy deep-learning dependencies. Piper must remain fully operational even if heavy neural TTS packages are uninstalled or failing.
 
 ========================================================================
-2. VOICE PROFILE MANAGEMENT SYSTEM (`VoiceProfileManager`)
-================--------------------------------------------------------
+3. VOICE PROFILE MANAGER (`VoiceProfileManager`)
+================================================
+Manages metadata, consent verification, and file validation for personalized companion voices.
+
 Directory Structure:
 data/
 └── voices/
     └── profiles/
         └── primary_user/
             ├── profile.json
-            └── reference.wav   (User sample voice recording)
+            └── reference.wav
 
-Metadata (`profile.json`):
+Metadata Format (`profile.json`):
 {
   "profile_name": "primary_user",
   "engine": "xtts_v2",
@@ -46,55 +50,53 @@ Metadata (`profile.json`):
   "consent_confirmed": true
 }
 
-Readiness Rules:
-A voice profile is READY only if ALL 6 conditions pass:
-1. Profile directory exists.
-2. `profile.json` exists and is valid JSON.
-3. Reference audio file (`reference.wav`) exists in the profile folder.
-4. Reference audio file is readable and non-empty (>0 bytes).
-5. `consent_confirmed` is true.
-6. `enabled` is true.
+Readiness Validation Rules:
+A voice profile is classified as READY only when all 7 of the following conditions pass:
+1. The profile directory exists (`data/voices/profiles/<profile_name>/`).
+2. `profile.json` exists in the profile directory.
+3. `profile.json` contains valid, parsable JSON.
+4. The reference audio file (`reference.wav`) exists.
+5. The reference audio file is readable and non-empty (>0 bytes).
+6. `consent_confirmed` is explicitly set to `true`.
+7. `enabled` is explicitly set to `true`.
 
 ========================================================================
-3. ENGINE SELECTOR (`EngineSelector`)
-================--------------------------------------------------------
+4. ENGINE SELECTOR (`EngineSelector`)
+=====================================
+The engine selector routes speech requests based on emergency context and profile readiness.
+
 Selection Rules:
-- Rule 1: Emergency mode ALWAYS uses Piper (`emergency=True` -> `piper`).
-- Rule 2: If personalized voice profile is not ready -> `piper`.
-- Rule 3: If personalized voice profile is ready -> `xtts_v2`.
+1. Emergency Mode: ALWAYS routes to Piper regardless of personalized profile state.
+2. Companion Mode (Profile Not Ready): Routes to Piper if profile validation fails.
+3. Companion Mode (Profile Ready): Routes to XTTS v2 when personalized speech is requested and validation passes.
+
+Routing Diagram:
+Emergency Request
+   ↓
+ Piper
+
+Companion Request
+   ↓
+Profile Ready?
+  ├── No  → Piper
+  └── Yes → XTTS v2
 
 ========================================================================
-4. DEBUGGING & PERSONALIZED VOICE VERIFICATION SUMMARY
-================--------------------------------------------------------
-Root Causes Identified & Fixed During Full Pipeline Testing:
-1. Missing `coqui-tts` package:
-   - Solution: Installed `coqui-tts` precompiled Windows x64 binary wheel (`coqui_tts-0.24.3-cp311-cp311-win_amd64.whl`).
-2. Dependency Version Incompatibility (`LogitsWarper` ImportError):
-   - Cause: `transformers==4.57.6` removed top-level `LogitsWarper` export.
-   - Solution: Downgraded to `transformers==4.39.3` and `tokenizers==0.15.2`.
-3. Audio Decoder DLL Failure (`TorchCodec` Error):
-   - Cause: `torchaudio==2.11.0` attempted `load_with_torchcodec` requiring non-installed FFmpeg C++ shared DLLs.
-   - Solution: Added automatic monkeypatch in `XTTSv2Engine.load_model()` replacing `torchaudio.load()` with `soundfile` reader, converting audio frames directly to PyTorch tensors.
-4. Interactive License Prompt Hang:
-   - Cause: Coqui TTS prompted for interactive license agreement (`[y/n]`).
-   - Solution: Set `os.environ["COQUI_TOS_AGREED"] = "1"` in `XTTSv2Engine.load_model()`.
+5. XTTS v2 ENGINE (`XTTSv2Engine`)
+===================================
+XTTS v2 provides optional, offline personalized voice synthesis via zero-shot speaker conditioning.
+
+* Role: Renders personalized companion speech using an authorized reference recording (`reference.wav`).
+* Lazy Loading: The XTTS v2 model and its PyTorch dependencies are not loaded during normal CARE DOLL startup or emergency operations. Loading occurs lazily only upon the first valid companion speech request.
+* Device Detection: Dynamically evaluates hardware capabilities at runtime:
+  - Checks `torch.cuda.is_available()`.
+  - If CUDA is available, uses GPU acceleration.
+  - If CUDA is unavailable, falls back to CPU execution.
+* Non-blocking Design: XTTS v2 failure or absence never disrupts the core Piper emergency engine.
 
 ========================================================================
-5. E2E SYNTHESIS VERIFICATION RESULTS
-================--------------------------------------------------------
-Sample Voice Reference Audio:
-- Source: `data/audio/recording_20260714_203944.wav` (545,324 bytes, 6.18 seconds, 44.1kHz 16-bit mono)
-
-Personalized Synthesis Output:
-- Output File: `data/tts/response_xtts_v2_20260720_131704.wav`
-- File Size: `394,348 bytes`
-- Audio Duration: `8.21 seconds`
-- Format: `24,000 Hz, 16-bit PCM Mono WAV`
-- Status: **PASSED (100% Verified)**
-
-========================================================================
-6. PIPELINE API & BACKWARD COMPATIBILITY
-================--------------------------------------------------------
+6. VOICE OUTPUT API (`speak()`)
+===============================
 Function Signature:
 ```python
 def speak(
@@ -106,5 +108,27 @@ def speak(
 ```
 
 API Usage Examples:
-- Emergency Mode: `speak("Emergency warning!", voice_profile="emergency")` -> Piper
-- Companion Mode: `speak("Hello!", voice_profile="companion", speaker_profile="primary_user")` -> XTTS v2
+* Emergency Warning (Always Piper):
+  `speak("Emergency warning! Pull over safely.", voice_profile="emergency")`
+  → Selected Engine: Piper
+
+* Companion Response (Conditional XTTS v2 / Piper Fallback):
+  `speak("Hello, your battery level is healthy.", voice_profile="companion", speaker_profile="primary_user")`
+  → Selected Engine: XTTS v2 (if profile passes all 7 readiness checks); otherwise Piper.
+
+========================================================================
+7. EMERGENCY VS. COMPANION SEPARATION PRINCIPLE
+================================================
+Core Architectural Principle:
+"Personalized voice cloning enhances CARE DOLL but must never be a dependency for emergency assistance."
+
+Emergency safety guidance remains 100% functional and lightweight through Piper even if XTTS v2 is uninstalled, disabled, or missing reference audio.
+
+========================================================================
+8. VERIFICATION SUMMARY
+=======================
+System testing confirms:
+1. Emergency requests reliably invoke Piper with zero neural dependency overhead.
+2. Profile readiness checks enforce all 7 validation rules before enabling XTTS v2.
+3. Fallback to Piper executes seamlessly whenever XTTS v2 initialization or audio conditioning is unavailable.
+========================================================================

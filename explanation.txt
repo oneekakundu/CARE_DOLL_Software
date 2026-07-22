@@ -1,299 +1,212 @@
 ========================================================================
-                      CARE DOLL: SYSTEM & MODEL EXPLANATION
+                 CARE DOLL: ARCHITECTURE & TECHNICAL RATIONALE
 ========================================================================
 
-1. ARCHITECTURAL OVERVIEW & WORKFLOW
-------------------------------------
-CARE DOLL is an offline-first AI Emergency Assistant designed for Electric-Vehicle 
-accidents and first-aid reference. It coordinates speech input, transcription, 
-retrieval-augmented generation (RAG), and modular text-to-speech (TTS) 
-technologies to work completely locally and offline.
+1. COMPLETE SYSTEM ARCHITECTURE
+--------------------------------
+CARE DOLL is an offline-first AI emergency assistant designed primarily for Electric Vehicle (EV) accident assistance and safety guidance. The entire system operates locally without relying on external cloud APIs or network connectivity.
 
 The end-to-end request-response pipeline is structured as follows:
 
-   [User Input (Microphone / WAV)]
-                 |
-                 v
-       [Voice_Input Module] (Records user speech)
-                 |
-                 v
-     [Speech-to-Text (Whisper)] (Transcribes audio into text query)
-                 |
-                 v
-      [RAG Ingestion / Ingested Markdown] (Reads pre-extracted Markdown from documents/extracted/)
-                 |
-                 v
-   [Retriever (FAISS + BGE-small)] (Identifies top-K most semantically relevant chunks)
-                 |
-                 v
-       [Ollama (Qwen 2.5:3b)] (Generates a context-grounded response using the chunks)
-                 |
-                 v
-       [Voice_Output Pipeline] (Validates text structure and starts audio rendering)
-                 |
-                 v
-      [Piper TTS (piper.exe)] (Synthesizes text into a natural-sounding voice WAV)
-                 |
-                 v
-   [data/tts/response_*.wav] (Saves the output WAV file)
-                 |
-                 v
-      [AudioPlayer (sounddevice)] (Streams the output to system speakers)
+   [Microphone / Audio Input]
+               │
+               ▼
+       [Voice_Input Module] (Records user audio input)
+               │
+               ▼
+    [Faster-Whisper STT] (Transcribes audio WAV to text query)
+               │
+               ▼
+       [Text Query Input]
+               │
+               ▼
+     [RAG Retrieval Pipeline] (Queries pre-indexed documents)
+               │
+               ▼
+     [FAISS Vector Store] (Performs dense vector similarity search)
+               │
+               ▼
+ [BGE-small-en-v1.5 Embeddings] (Encodes queries & document chunks)
+               │
+               ▼
+       [Ollama Local Server] (Orchestrates LLM execution)
+               │
+               ▼
+      [Qwen 2.5:3b LLM] (Generates grounded response from context)
+               │
+               ▼
+    [Grounded Text Response]
+               │
+               ▼
+     [Voice_Output Pipeline] (Routes request via speak() API)
+               │
+               ▼
+       [EngineSelector] (Evaluates mode & profile readiness)
+            ┌──┴──┐
+            ▼     ▼
+     [Piper TTS] [XTTS v2]
+            └──┬──┘
+               ▼
+       [WAV Audio Output] (Saves synthesized audio to data/tts/)
+               │
+               ▼
+  [AudioPlayer (sounddevice)] (Streams WAV output to system speakers)
 
+------------------------------------------------------------------------
+2. MODEL AND TECHNOLOGY RATIONALE
+------------------------------------------------------------------------
 
-2. COMPONENT & MODEL ROLES (WHY THESE MODELS?)
-----------------------------------------------
+A. Speech-to-Text: Faster-Whisper (Whisper Base)
+- Role: Converts spoken audio input into structured text queries.
+- Technical Rationale: Faster-Whisper utilizes CTranslate2 for CPU-optimized inference with int8 quantization. It delivers accurate, low-latency transcription locally without requiring internet access or high GPU VRAM.
 
-A. Text-to-Speech: Piper TTS (en_US-lessac-medium.onnx)
-- Role: Synthesizes high-quality, local, offline voice responses from text.
-- Why: Piper is written in C++ and optimized for low-resource environments (like Raspberry Pi 
-  or older laptops). It runs with near-zero latency, does not require an active internet connection, 
-  and sounds significantly more natural and human-like than legacy robotic Windows SAPI voices.
-- Execution: Managed by `Voice_Output/`. It runs a validation check on startup to verify 
-  executables, model files, and output file writing.
+B. Vector Similarity Search: FAISS
+- Role: Stores embedding vectors of document chunks and executes high-speed similarity searches.
+- Technical Rationale: FAISS (Facebook AI Similarity Search) provides fast, memory-efficient vector searching using Inner Product (IP) distance metrics. It operates completely in-process, requiring no external database servers or background daemon processes.
 
-B. Large Language Model: Ollama (Qwen 2.5:3b)
-- Role: Generates responses grounded strictly within the retrieved documentation.
-- Why: Qwen 2.5 (3B) is a highly capable small language model, demonstrating superior 
-  instruction-following and factual parsing capabilities for its size. It fits within standard 
-  consumer memory limits, ensuring the system remains offline-first.
-- Grounding: A strict custom prompt prevents the model from hallucinating outside the retrieved RAG manual content.
+C. Text Embeddings: BAAI/bge-small-en-v1.5
+- Role: Converts raw text document chunks and user queries into 384-dimensional dense vector embeddings.
+- Technical Rationale: BAAI/bge-small-en-v1.5 offers top-tier retrieval performance among lightweight embedding models. It loads in under 1.5 seconds and runs efficiently on CPU with a minimal memory footprint.
 
-C. Vector Store: FAISS (Facebook AI Similarity Search)
-- Role: Indexes text chunks and performs high-speed similarity search using Inner Product (IP) metric.
-- Why: Extremely fast, lightweight, and requires no running database servers.
+D. Local LLM Orchestration: Ollama + Qwen 2.5:3b
+- Role: Generates clear, structured response text grounded strictly in retrieved safety manuals.
+- Technical Rationale: Qwen 2.5 (3B parameters) executed via Ollama balances high instruction-following precision with low resource consumption. Running via Ollama ensures local execution. The prompt conditions the LLM to generate responses grounded in retrieved context; however, standard AI disclaimers apply as no LLM is guaranteed to be completely hallucination-free.
 
-D. Embedding Model: Sentence-Transformers (BAAI/bge-small-en-v1.5)
-- Role: Translates raw text chunks and user queries into 384-dimensional dense vectors.
-- Why: BGE-small is one of the highest-rated lightweight embeddings models, allowing rapid 
-  quantization and loading (under 1.5s) on consumer CPUs with minimal memory footprints.
+E. Default Emergency TTS: Piper (`en_US-lessac-medium.onnx`)
+- Role: Renders rapid, lightweight, and reliable voice audio for emergency responses and safety alerts.
+- Technical Rationale: Piper is a C++ compiled ONNX runtime engine optimized for low-resource devices. It synthesizes audio with minimal latency, requires zero heavy deep-learning dependencies, and guarantees voice response availability during critical emergencies.
 
-E. Speech-to-Text: Faster-Whisper (Whisper Base)
-- Role: Transcribes recorded WAV files into text.
-- Why: Employs CTranslate2 translation engines to perform Whisper inference on CPUs with `int8` 
-  quantization, rendering transcrips with high accuracy and speed.
+F. Personalized Companion TTS: XTTS v2
+- Role: Provides optional personalized voice synthesis conditioned on a short reference recording.
+- Technical Rationale: XTTS v2 enables zero-shot voice cloning for non-emergency companion interactions. It remains completely optional so as not to compromise emergency system startup or hardware reliability.
 
+------------------------------------------------------------------------
+3. RAG EXTRACTION AND INGESTION PROCEDURE
+------------------------------------------------------------------------
+To ensure query-time operation remains instantaneous, CARE DOLL decouples document extraction from real-time query execution:
 
-3. THE RAG EXTRACTION AND INGESTION PROCEDURE
----------------------------------------------
-To ensure query startups are instantaneous, the extraction pipeline is completely decoupled:
+   documents/raw/ (Raw PDF manuals)
+          │
+          ▼
+   [Docling Extraction] (Run via offline extraction script)
+          │
+          ▼
+   documents/extracted/ (Structured Markdown & JSON files)
+          │
+          ▼
+   [FAISS Vector Store Indexing] (Embedded via BGE-small)
 
-1. Target Pathing:
-   - Raw files (PDFs) are stored in `documents/raw/`.
-   - Extracted files are stored in `documents/extracted/`.
-2. Document Extraction:
-   - Run `python -m RAG.extract_docs` to parse raw PDF files using Docling.
-   - Outputs markdown (`.md`) and JSON files directly into `documents/extracted/`.
-3. Ingestion:
-   - When running `main.py`, the RAG pipeline scans only `documents/extracted/`.
-   - Since Markdown is lightweight, building or loading the FAISS vector index takes <0.1 seconds, 
-     entirely bypassing PyTorch OCR model initialization delays on startup.
+During normal application startup (`main.py`), the system loads pre-extracted content from `documents/extracted/` and pre-built FAISS indices. This design eliminates runtime PDF parsing and heavy OCR model initialization, enabling instant startup.
 
+------------------------------------------------------------------------
+4. LAZY LOADING AND RESOURCE MANAGEMENT
+------------------------------------------------------------------------
+To preserve system RAM and VRAM during critical operations, XTTS v2 uses lazy loading and lazy imports.
 
-4. FUTURE IMPROVEMENTS
-----------------------
-1. Multilingual Support: Load alternative Piper languages and Whisper transcription weights.
-2. Dynamic Voice Profiles: Adapt the speech profile style dynamically (e.g. fast, high-pitch 
-   "emergency" alerts during crashes; calm, low-pace "companion" voices for instruction guides).
-3. Wake-Word Integration: Incorporate OpenWakeWord for continuous, hands-free active monitoring.
-4. Portability: Compile the program dependencies to deploy directly on physical companion hardware (Raspberry Pi/Linux boards).
-========================================================================
+Key Resource Rules:
+- XTTS v2 is not loaded during normal CARE DOLL startup, RAG indexing, or LLM response generation.
+- Piper operates independently and is immediately available upon system boot.
+- Heavy PyTorch and deep-learning packages for XTTS v2 are imported lazily only when a valid companion speech request is executed.
+- Hardware execution (GPU CUDA vs CPU) is determined dynamically before model initialization.
 
-## GPU/CPU BEHAVIOR AND LAZY LOADING
+Logical Resource & Execution Flow:
 
-The personalized XTTS v2 voice-cloning subsystem is designed as an optional, lazily loaded component of CARE DOLL.
-
-Piper remains the default Text-to-Speech engine and is used for emergency responses. XTTS v2 is initialized only when a personalized voice profile is available and personalized companion speech is requested.
-
-### Lazy Loading
-
-The `XTTSv2Engine` does not load the XTTS v2 neural model during normal CARE DOLL startup.
-
-During:
-
-* Standard system startup
-* RAG initialization
-* LLM response generation
-* Emergency mode
-* Piper-based speech synthesis
-
-the XTTS v2 model is not loaded into GPU VRAM or system RAM.
-
-The XTTS model is loaded only when all of the following conditions are satisfied:
-
-1. A personalized voice mode is requested.
-2. A valid voice profile exists.
-3. The authorized reference audio is available.
-4. XTTS v2 is installed and configured.
-
-The implementation should also use lazy imports for heavy XTTS and deep-learning dependencies wherever practical. This prevents unnecessary initialization overhead when CARE DOLL is operating exclusively in Piper mode.
-
-The intended execution flow is:
-
-```text
 CARE DOLL Startup
-        |
-        v
-   Piper Available
-        |
-        v
-  Normal Operation
-        |
-        ├── Emergency Request
-        │       |
-        │       v
-        │     Piper
-        │
-        └── Companion Request
-                |
-                v
-       Personalized Profile Ready?
-                |
-          ┌─────┴─────┐
-          │           │
-         No          Yes
-          │           │
-          v           v
-        Piper      XTTS v2
-                      |
-                      v
-              Load Model Lazily
-```
+       │
+       ▼
+  Piper Available
+       │
+       ▼
+ Normal Operation
+       │
+       ├── Emergency Request ───────────────► Piper
+       │
+       └── Companion Request
+               │
+               ▼
+      Personalized Profile Ready?
+         ┌─────┴─────┐
+        No          Yes
+         │           │
+         ▼           ▼
+       Piper      XTTS v2
+                     │
+                     ▼
+             Lazy Model Loading
 
-This architecture ensures that the heavier XTTS v2 subsystem does not affect the reliability or startup performance of the core emergency assistant.
-
----
-
-### Device Detection
-
-Before loading the XTTS v2 model, the system detects the available execution device.
-
-The detection logic checks whether CUDA is available through PyTorch:
+------------------------------------------------------------------------
+5. DYNAMIC DEVICE DETECTION
+------------------------------------------------------------------------
+Before initializing the XTTS v2 engine, CARE DOLL dynamically inspects available hardware using PyTorch:
 
 ```python
 torch.cuda.is_available()
 ```
 
-If a compatible NVIDIA CUDA environment is available:
+- If CUDA is available: XTTS v2 is configured for GPU execution (CUDA), providing faster audio synthesis.
+- If CUDA is unavailable: XTTS v2 gracefully falls back to CPU execution.
 
-```text
-XTTS v2 device: CUDA
-```
+The system dynamically detects device availability at runtime and never assumes CUDA hardware is present.
 
-the model is configured to use GPU acceleration.
+------------------------------------------------------------------------
+6. VOICE PROFILE VALIDATION AND CONDITIONING
+------------------------------------------------------------------------
+Voice profiles are stored in structured directories:
 
-If CUDA is unavailable:
+data/voices/profiles/primary_user/
+├── profile.json
+└── reference.wav
 
-```text
-XTTS v2 device: CPU
-```
+Profile metadata (`profile.json`) defines profile configuration:
+{
+  "profile_name": "primary_user",
+  "engine": "xtts_v2",
+  "language": "en",
+  "reference_audio": "reference.wav",
+  "enabled": true,
+  "consent_confirmed": true
+}
 
-the system falls back to CPU execution.
+Validation Requirements:
+A profile is considered READY only when all 7 validation rules pass:
+1. Profile directory exists.
+2. `profile.json` exists.
+3. `profile.json` contains valid JSON.
+4. Reference audio file (`reference.wav`) exists.
+5. Reference audio file is readable and non-empty (>0 bytes).
+6. `consent_confirmed` is `true`.
+7. `enabled` is `true`.
 
-The device selection is therefore:
+Speaker Conditioning Rationale:
+XTTS v2 does not train a new neural voice model from scratch. Instead, it extracts acoustic speaker characteristics from `reference.wav` to condition zero-shot audio synthesis. Strict consent (`consent_confirmed: true`) and explicit user enablement (`enabled: true`) ensure privacy compliance and user authorization before conditioning takes place.
 
-```text
-CUDA Available?
-      |
-  ┌───┴───┐
- Yes      No
-  |        |
-  v        v
- CUDA     CPU
-```
+------------------------------------------------------------------------
+7. EMERGENCY RELIABILITY DESIGN
+------------------------------------------------------------------------
+Emergency assistance reliability is the primary design mandate of CARE DOLL:
 
-The system must not assume that a CUDA-capable NVIDIA GPU is always available. Device selection should be detected dynamically at runtime.
+   Emergency Functionality ──► Must NOT Depend On ──► XTTS v2
 
-Because XTTS v2 is considerably heavier than Piper, GPU execution is preferred when compatible hardware and drivers are available. CPU execution remains available as a compatibility fallback, although synthesis may be slower.
+Fallback Architecture:
+If XTTS v2 is uninstalled, dependency conflicts occur, profile validation fails, or audio hardware is restricted, CARE DOLL enforces an automatic fallback chain:
 
----
+   Personalized XTTS v2 Unavailable / Profile Not Ready
+                          │
+                          ▼
+                    Piper Fallback
+                          │
+                          ▼
+       Emergency Assistant Continues Operating Seamlessly
 
-### Speaker Conditioning
+------------------------------------------------------------------------
+8. FUTURE IMPROVEMENTS
+------------------------------------------------------------------------
+The following capabilities represent planned future work:
 
-XTTS v2 uses a reference recording to condition the generated speech toward the characteristics of an authorized speaker.
+1. Multilingual Support: Integration of multilingual Piper ONNX models and Whisper transcription weights for non-English emergency response.
+2. Dynamic Voice Profiles: Context-aware vocal inflection (e.g., rapid, high-pitch alerts for active crashes vs. calm, deliberate tone for maintenance guides).
+3. Wake-Word Integration: Continuous hands-free monitoring utilizing OpenWakeWord for voice activation in vehicle cabins.
+4. Hardware Portability: Target cross-compilation for embedded single-board computers (e.g., Raspberry Pi or automotive ARM hardware).
 
-For example:
-
-```text
-data/
-└── voices/
-    └── profiles/
-        └── primary_user/
-            └── reference.wav
-```
-
-The reference recording is supplied to the XTTS v2 synthesis process as the speaker reference audio.
-
-Conceptually:
-
-```text
-Text Response
-      +
-      │
-      ▼
-Authorized Reference Audio
-      +
-      │
-      ▼
-XTTS v2
-      │
-      ▼
-Personalized Speech
-```
-
-The reference audio is used to condition the generated voice rather than requiring the system to train a new neural TTS model from scratch.
-
-The voice profile manager is responsible for verifying that:
-
-* The profile exists.
-* The reference audio exists.
-* The audio file is readable.
-* The profile is enabled.
-* The required consent flag is confirmed.
-
-Only after these checks succeed should the reference audio be passed to XTTS v2.
-
----
-
-### Emergency and Personalized Voice Separation
-
-CARE DOLL intentionally separates emergency speech from personalized companion speech.
-
-#### Emergency Mode
-
-```text
-Emergency Response
-        |
-        v
-      Piper
-        |
-        v
-   Fast Reliable Audio
-```
-
-#### Personalized Companion Mode
-
-```text
-Companion Response
-        |
-        v
-Personalized Profile Ready?
-        |
-   ┌────┴────┐
-  No        Yes
-   |          |
-   v          v
- Piper      XTTS v2
-              |
-              v
-     Personalized Voice
-```
-
-This separation ensures that the personalized voice-cloning subsystem remains optional.
-
-If XTTS v2 is unavailable, the personalized profile is incomplete, or the reference audio cannot be accessed, the core CARE DOLL emergency assistant continues operating through Piper.
-
-The design principle is:
-
-> **Personalized voice cloning enhances CARE DOLL but must never be a dependency for emergency assistance.**
-
+Note: These features are future design goals and are not presented as current implementations.
+========================================================================
